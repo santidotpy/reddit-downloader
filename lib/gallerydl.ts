@@ -45,10 +45,10 @@ function authArgs(): string[] {
   if (process.env.GALLERY_DL_CONFIG) {
     args.push("--config", process.env.GALLERY_DL_CONFIG);
   }
-  const ua = process.env.REDDIT_USER_AGENT;
-  if (ua) {
-    args.push("-o", `extractor.reddit.user-agent=${ua}`, "--user-agent", ua);
-  }
+  // Deliberately DO NOT override the user-agent: gallery-dl's default reddit UA
+  // is browser-like and passes Reddit's WAF, whereas the legacy REDDIT_USER_AGENT
+  // (Reddit API "app:id:ver" format, for the old pipeline) is bot-shaped and gets
+  // blocked. Override only via an explicit GALLERY_DL_CONFIG if ever needed.
   // OAuth only: a client-id WITHOUT a matching refresh-token makes gallery-dl
   // attempt (and fail) OAuth -> AuthenticationError, clobbering cookie auth. So
   // only send the reddit OAuth pair when both are present; otherwise let
