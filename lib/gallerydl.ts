@@ -49,11 +49,17 @@ function authArgs(): string[] {
   if (ua) {
     args.push("-o", `extractor.reddit.user-agent=${ua}`, "--user-agent", ua);
   }
-  if (process.env.REDDIT_CLIENT_ID) {
-    args.push("-o", `extractor.reddit.client-id=${process.env.REDDIT_CLIENT_ID}`);
-  }
+  // OAuth only: a client-id WITHOUT a matching refresh-token makes gallery-dl
+  // attempt (and fail) OAuth -> AuthenticationError, clobbering cookie auth. So
+  // only send the reddit OAuth pair when both are present; otherwise let
+  // gallery-dl use its built-in client-id + whatever cookies we passed. The
+  // legacy REDDIT_CLIENT_ID (for the old custom pipeline) is intentionally NOT
+  // forwarded on its own.
   if (process.env.REDDIT_REFRESH_TOKEN) {
     args.push("-o", `extractor.reddit.refresh-token=${process.env.REDDIT_REFRESH_TOKEN}`);
+    if (process.env.REDDIT_CLIENT_ID) {
+      args.push("-o", `extractor.reddit.client-id=${process.env.REDDIT_CLIENT_ID}`);
+    }
   }
   if (process.env.GALLERY_DL_COOKIES) {
     args.push("--cookies", process.env.GALLERY_DL_COOKIES);
