@@ -64,6 +64,8 @@ export async function GET(req: NextRequest) {
       mediaCount: 1,
       hasAudio: Boolean(post.video?.hasAudio),
       durationSeconds: post.video?.durationSeconds ?? null,
+      width: post.video?.width ?? null,
+      height: post.video?.height ?? null,
       processingMs: Date.now() - start,
     });
   });

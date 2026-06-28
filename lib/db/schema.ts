@@ -40,6 +40,8 @@ export const downloadEvents = pgTable("download_events", {
   hasAudio: boolean("has_audio").notNull(),
   mediaCount: integer("media_count").notNull(),
   fileSizeBytes: bigint("file_size_bytes", { mode: "number" }).notNull(),
+  width: integer("width"),
+  height: integer("height"),
   durationSeconds: integer("duration_seconds"),
   redditScore: integer("reddit_score"),
   status: downloadStatusEnum("status").notNull(),

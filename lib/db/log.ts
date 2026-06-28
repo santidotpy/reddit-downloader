@@ -16,6 +16,8 @@ export interface DownloadLog {
   mediaCount: number;
   hasAudio: boolean;
   durationSeconds: number | null;
+  width?: number | null;
+  height?: number | null;
   processingMs: number;
 }
 
@@ -31,6 +33,8 @@ export async function logDownloadEvent(input: DownloadLog): Promise<void> {
     hasAudio: input.hasAudio,
     mediaCount: input.mediaCount,
     fileSizeBytes: Math.max(0, Math.round(input.fileSizeBytes)),
+    width: input.width ?? null,
+    height: input.height ?? null,
     durationSeconds: input.durationSeconds,
     redditScore: input.post.score,
     status: input.status,

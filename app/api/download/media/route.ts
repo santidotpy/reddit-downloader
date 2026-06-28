@@ -98,6 +98,8 @@ export async function GET(req: NextRequest) {
         mediaCount: 1,
         hasAudio: false,
         durationSeconds: null,
+        width: asset.width ?? null,
+        height: asset.height ?? null,
         processingMs: Date.now() - start,
       });
     },

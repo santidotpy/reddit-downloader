@@ -1,22 +1,19 @@
 /**
  * Public surface of the Reddit extraction pipeline.
  *
- * `processRedditUrl` is the end-to-end path used by the queue in phase 2:
- *   resolve short/share link -> fetch .json -> classify.
+ * `processRedditUrl` is the end-to-end path used by the queue: it now delegates
+ * link resolution + metadata extraction to gallery-dl (see `lib/gallerydl.ts`),
+ * which returns a normalized `ResolvedPost`. The legacy modules (`fetch-json`,
+ * `classify`, `resolveRedditUrl`) are kept for reference/fallback but are no
+ * longer on the hot path.
  */
-import { resolveRedditUrl } from "./url";
-import { fetchPostJson } from "./fetch-json";
-import { classifyPost } from "./classify";
+import { extractPost } from "@/lib/gallerydl";
 import type { ResolvedPost } from "./types";
 
 export async function processRedditUrl(rawUrl: string): Promise<ResolvedPost> {
-  const permalink = await resolveRedditUrl(rawUrl);
-  const post = await fetchPostJson(permalink);
-  return classifyPost(post, permalink);
+  return extractPost(rawUrl);
 }
 
 export * from "./types";
 export * from "./errors";
-export { detectRedditUrls, isRedditHost, resolveRedditUrl } from "./url";
-export { fetchPostJson } from "./fetch-json";
-export { classifyPost } from "./classify";
+export { detectRedditUrls, isRedditHost, isRedditMediaHost } from "./url";
