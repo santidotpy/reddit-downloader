@@ -28,10 +28,32 @@ const EXTRACT_TIMEOUT_MS = 60_000;
 const MAX_OUTPUT_BYTES = 32 * 1024 * 1024;
 
 // gallery-dl `-j` emits a JSON array of `[messageType, ...args]` tuples.
+const MSG_ERROR = -1; // [-1, {error, message}] -> extractor aborted
 const MSG_DIRECTORY = 2; // [2, kwdict]            -> post-level metadata
 const MSG_URL = 3; // [3, url, kwdict]       -> one downloadable file
+const MSG_QUEUE = 6; // [6, url, kwdict]       -> a URL to resolve in a separate pass
 
-/** Subset of the Reddit extractor's metadata we care about; tolerant of extras. */
+// Share/short links (reddit.com/r/x/s/y, redd.it/y) resolve to a single queued
+// canonical permalink; we follow it. Bounded to avoid loops/listing pages.
+const MAX_RESOLVE_DEPTH = 2;
+
+// Reddit nests video facts under `media.reddit_video`; `secure_media` mirrors it
+// for over-18 posts. These are the authoritative source for duration/dims/audio.
+const RedditVideo = z
+  .object({
+    duration: z.number().optional(),
+    width: z.number().optional(),
+    height: z.number().optional(),
+    has_audio: z.boolean().optional(),
+  })
+  .passthrough();
+
+/**
+ * Subset of the Reddit extractor's metadata we care about; tolerant of extras.
+ * gallery-dl yields Reddit's raw submission dict, so these are Reddit API field
+ * names. Per-asset width/height are intentionally absent here — the extractor
+ * doesn't emit them, so dimensions come from the downloaded file instead.
+ */
 const Kw = z
   .object({
     title: z.string().optional(),
@@ -41,9 +63,8 @@ const Kw = z
     domain: z.string().optional(),
     permalink: z.string().optional(),
     is_video: z.boolean().optional(),
-    width: z.number().optional(),
-    height: z.number().optional(),
-    duration: z.number().optional(),
+    media: z.object({ reddit_video: RedditVideo.optional() }).passthrough().optional(),
+    secure_media: z.object({ reddit_video: RedditVideo.optional() }).passthrough().optional(),
   })
   .passthrough();
 type Kw = z.infer<typeof Kw>;
@@ -58,6 +79,10 @@ interface UrlEntry {
  * downloaded — this feeds the live cards and most of the analytics.
  */
 export async function extractPost(rawUrl: string): Promise<ResolvedPost> {
+  return extractAt(rawUrl, 0);
+}
+
+async function extractAt(rawUrl: string, depth: number): Promise<ResolvedPost> {
   const stdout = await runGalleryDl(["-j", "--", rawUrl]);
 
   let parsed: unknown;
@@ -74,14 +99,27 @@ export async function extractPost(rawUrl: string): Promise<ResolvedPost> {
 
   let meta: Kw = {};
   const urls: UrlEntry[] = [];
+  const queued: string[] = [];
   for (const entry of entries.data) {
     const type = entry[0];
-    if (type === MSG_DIRECTORY && entry[1]) {
+    if (type === MSG_ERROR) {
+      throw errorFromAbort(entry[1]);
+    } else if (type === MSG_DIRECTORY && entry[1]) {
       meta = { ...meta, ...Kw.parse(entry[1]) };
     } else if (type === MSG_URL && typeof entry[1] === "string") {
       urls.push({ url: entry[1], kw: entry[2] ? Kw.parse(entry[2]) : {} });
+    } else if (type === MSG_QUEUE && typeof entry[1] === "string") {
+      queued.push(entry[1]);
     }
   }
+
+  // A share/short link resolves to exactly one queued canonical permalink:
+  // follow it. More than one queued URL means a listing/multi-post page, which
+  // is out of scope (we resolve single posts only).
+  if (urls.length === 0 && queued.length === 1 && depth < MAX_RESOLVE_DEPTH) {
+    return extractAt(queued[0], depth + 1);
+  }
+
   // Fall back to the first file's kwdict for post-level fields if there was no
   // directory message.
   if (urls[0]) meta = { ...urls[0].kw, ...meta };
@@ -108,23 +146,23 @@ function normalize(rawUrl: string, meta: Kw, urls: UrlEntry[]): ResolvedPost {
     urls.some((u) => u.url.startsWith("ytdl:") || /\bv\.redd\.it\b/.test(u.url));
 
   if (isVideo) {
+    const rv = meta.media?.reddit_video ?? meta.secure_media?.reddit_video;
     return {
       ...base,
       postType: "video",
       assets: [],
       video: {
-        durationSeconds: meta.duration,
-        width: meta.width,
-        height: meta.height,
+        durationSeconds: rv?.duration,
+        width: rv?.width,
+        height: rv?.height,
+        hasAudio: rv?.has_audio,
       },
     };
   }
 
-  const assets: MediaAsset[] = urls.map((u) => ({
-    url: u.url,
-    width: u.kw.width,
-    height: u.kw.height,
-  }));
+  // The extractor doesn't emit per-asset dimensions; they're filled from the
+  // downloaded file at download time (Strategy B).
+  const assets: MediaAsset[] = urls.map((u) => ({ url: u.url }));
 
   if (assets.length > 1) return { ...base, postType: "gallery", assets };
   if (assets.length === 1) return { ...base, postType: "image", assets };
@@ -150,6 +188,32 @@ async function runGalleryDl(args: string[]): Promise<string> {
   } catch (err) {
     throw toFetchError(err);
   }
+}
+
+/** Map a gallery-dl `[-1, {error, message}]` abort entry to a typed error. */
+function errorFromAbort(payload: unknown): RedditFetchError {
+  const p = payload as { error?: string; message?: string } | undefined;
+  const msg = (p?.message ?? "").slice(0, 300).toLowerCase();
+  if (
+    msg.includes("blocked by network security") ||
+    msg.includes("403") ||
+    msg.includes("forbidden")
+  ) {
+    return new RedditFetchError(
+      "forbidden",
+      "Reddit bloqueó el acceso (WAF/IP o falta de OAuth). gallery-dl no pudo extraer el post.",
+    );
+  }
+  if (msg.includes("404") || msg.includes("not found")) {
+    return new RedditFetchError("not_found", "Reddit no encontró el post (404).");
+  }
+  if (msg.includes("429") || msg.includes("too many requests")) {
+    return new RedditFetchError("rate_limit", "Reddit limitó las peticiones (429). Reintentá luego.");
+  }
+  return new RedditFetchError(
+    "network",
+    `gallery-dl abortó la extracción: ${p?.error ?? "error desconocido"}.`,
+  );
 }
 
 function toFetchError(err: unknown): RedditFetchError {
