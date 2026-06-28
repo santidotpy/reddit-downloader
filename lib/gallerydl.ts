@@ -27,6 +27,45 @@ const GALLERY_DL = process.env.GALLERY_DL_PATH || "gallery-dl";
 const EXTRACT_TIMEOUT_MS = 60_000;
 const MAX_OUTPUT_BYTES = 32 * 1024 * 1024;
 
+/**
+ * Reddit fronts its API with a bot-detection WAF that blocks datacenter IPs and
+ * unrecognized clients ("blocked by network security"). gallery-dl needs to be
+ * told who it is to get through; we pass everything explicitly so the app's
+ * process doesn't depend on a global gallery-dl config it may not even read.
+ *
+ * Levers, in increasing order of effectiveness against the WAF:
+ *   REDDIT_USER_AGENT     - a descriptive/browser-like UA (Reddit blocks generic ones)
+ *   REDDIT_CLIENT_ID +    - app-only / authenticated OAuth -> requests hit
+ *   REDDIT_REFRESH_TOKEN    oauth.reddit.com instead of the walled web path
+ *   GALLERY_DL_COOKIES    - path to a browser cookies.txt (strongest bypass)
+ *   GALLERY_DL_CONFIG     - explicit config file (overrides default discovery)
+ */
+function authArgs(): string[] {
+  const args: string[] = [];
+  if (process.env.GALLERY_DL_CONFIG) {
+    args.push("--config", process.env.GALLERY_DL_CONFIG);
+  }
+  const ua = process.env.REDDIT_USER_AGENT;
+  if (ua) {
+    args.push("-o", `extractor.reddit.user-agent=${ua}`, "--user-agent", ua);
+  }
+  if (process.env.REDDIT_CLIENT_ID) {
+    args.push("-o", `extractor.reddit.client-id=${process.env.REDDIT_CLIENT_ID}`);
+  }
+  if (process.env.REDDIT_REFRESH_TOKEN) {
+    args.push("-o", `extractor.reddit.refresh-token=${process.env.REDDIT_REFRESH_TOKEN}`);
+  }
+  if (process.env.GALLERY_DL_COOKIES) {
+    args.push("--cookies", process.env.GALLERY_DL_COOKIES);
+  }
+  // e.g. "firefox", "chrome", "safari" — uses your logged-in Reddit session,
+  // the most reliable way past the WAF for local/personal use.
+  if (process.env.GALLERY_DL_COOKIES_FROM_BROWSER) {
+    args.push("--cookies-from-browser", process.env.GALLERY_DL_COOKIES_FROM_BROWSER);
+  }
+  return args;
+}
+
 // gallery-dl `-j` emits a JSON array of `[messageType, ...args]` tuples.
 const MSG_ERROR = -1; // [-1, {error, message}] -> extractor aborted
 const MSG_DIRECTORY = 2; // [2, kwdict]            -> post-level metadata
@@ -180,7 +219,7 @@ function normalize(rawUrl: string, meta: Kw, urls: UrlEntry[]): ResolvedPost {
 /** Run gallery-dl, mapping spawn/exit failures to typed `RedditFetchError`s. */
 async function runGalleryDl(args: string[]): Promise<string> {
   try {
-    const { stdout } = await execFileAsync(GALLERY_DL, args, {
+    const { stdout } = await execFileAsync(GALLERY_DL, [...authArgs(), ...args], {
       timeout: EXTRACT_TIMEOUT_MS,
       maxBuffer: MAX_OUTPUT_BYTES,
     });
@@ -193,7 +232,9 @@ async function runGalleryDl(args: string[]): Promise<string> {
 /** Map a gallery-dl `[-1, {error, message}]` abort entry to a typed error. */
 function errorFromAbort(payload: unknown): RedditFetchError {
   const p = payload as { error?: string; message?: string } | undefined;
-  const msg = (p?.message ?? "").slice(0, 300).toLowerCase();
+  // The decisive phrase can sit at the END of a huge HTML/CSS block page, so
+  // scan the whole message (capped), not just the head.
+  const msg = (p?.message ?? "").slice(0, 100_000).toLowerCase();
   if (
     msg.includes("blocked by network security") ||
     msg.includes("403") ||
@@ -201,7 +242,7 @@ function errorFromAbort(payload: unknown): RedditFetchError {
   ) {
     return new RedditFetchError(
       "forbidden",
-      "Reddit bloqueó el acceso (WAF/IP o falta de OAuth). gallery-dl no pudo extraer el post.",
+      "Reddit bloqueó el acceso (WAF/IP o falta de OAuth). Probá configurar REDDIT_USER_AGENT, REDDIT_REFRESH_TOKEN o GALLERY_DL_COOKIES.",
     );
   }
   if (msg.includes("404") || msg.includes("not found")) {
