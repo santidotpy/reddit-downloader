@@ -224,13 +224,31 @@ function normalize(rawUrl: string, meta: Kw, urls: UrlEntry[]): ResolvedPost {
 
 /** Run gallery-dl, mapping spawn/exit failures to typed `RedditFetchError`s. */
 async function runGalleryDl(args: string[]): Promise<string> {
+  const debug = process.env.NODE_ENV !== "production";
+  if (debug) {
+    // Which auth levers the app process actually sees (no secrets), so we can
+    // tell whether the cookies flag reached gallery-dl at all.
+    console.error("[gallery-dl] auth:", {
+      cookiesFromBrowser: process.env.GALLERY_DL_COOKIES_FROM_BROWSER ?? null,
+      cookiesFile: process.env.GALLERY_DL_COOKIES ?? null,
+      config: process.env.GALLERY_DL_CONFIG ?? null,
+      oauth: Boolean(process.env.REDDIT_REFRESH_TOKEN),
+    });
+  }
   try {
-    const { stdout } = await execFileAsync(GALLERY_DL, [...authArgs(), ...args], {
+    const { stdout, stderr } = await execFileAsync(GALLERY_DL, [...authArgs(), ...args], {
       timeout: EXTRACT_TIMEOUT_MS,
       maxBuffer: MAX_OUTPUT_BYTES,
     });
+    // gallery-dl logs "[cookies][info] Extracted N cookies from Chrome" (or a
+    // warning if it couldn't read them) to stderr — the decisive diagnostic.
+    if (debug && stderr.trim()) console.error("[gallery-dl] stderr:", stderr.trim());
     return stdout;
   } catch (err) {
+    if (debug) {
+      const e = err as { stderr?: string };
+      if (e?.stderr?.trim()) console.error("[gallery-dl] stderr:", e.stderr.trim());
+    }
     throw toFetchError(err);
   }
 }
