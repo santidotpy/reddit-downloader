@@ -31,6 +31,9 @@ pnpm-debug.log*
 # env files (can opt-in for committing if needed)
 .env*
 
+# exported browser cookies (Reddit session — secret, never commit)
+*cookies*.txt
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

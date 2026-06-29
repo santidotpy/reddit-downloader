@@ -108,11 +108,22 @@ const Kw = z
     domain: z.string().optional(),
     permalink: z.string().optional(),
     is_video: z.boolean().optional(),
-    media: z.object({ reddit_video: RedditVideo.optional() }).passthrough().optional(),
-    secure_media: z.object({ reddit_video: RedditVideo.optional() }).passthrough().optional(),
+    // Reddit sends `null` (not absent) for these on non-video posts -> nullish.
+    media: z.object({ reddit_video: RedditVideo.optional() }).passthrough().nullish(),
+    secure_media: z.object({ reddit_video: RedditVideo.optional() }).passthrough().nullish(),
   })
   .passthrough();
 type Kw = z.infer<typeof Kw>;
+
+/** Tolerant parse: an unexpected submission shape degrades to {}, never throws. */
+function parseKw(value: unknown): Kw {
+  const result = Kw.safeParse(value);
+  if (result.success) return result.data;
+  if (process.env.NODE_ENV !== "production") {
+    console.error("[gallery-dl] kw parse fell back:", result.error.issues);
+  }
+  return {};
+}
 
 interface UrlEntry {
   url: string;
@@ -150,9 +161,9 @@ async function extractAt(rawUrl: string, depth: number): Promise<ResolvedPost> {
     if (type === MSG_ERROR) {
       throw errorFromAbort(entry[1]);
     } else if (type === MSG_DIRECTORY && entry[1]) {
-      meta = { ...meta, ...Kw.parse(entry[1]) };
+      meta = { ...meta, ...parseKw(entry[1]) };
     } else if (type === MSG_URL && typeof entry[1] === "string") {
-      urls.push({ url: entry[1], kw: entry[2] ? Kw.parse(entry[2]) : {} });
+      urls.push({ url: entry[1], kw: entry[2] ? parseKw(entry[2]) : {} });
     } else if (type === MSG_QUEUE && typeof entry[1] === "string") {
       queued.push(entry[1]);
     }
