@@ -54,9 +54,15 @@ function formatDuration(seconds?: number): string | null {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
+const DISPLAYABLE_IMAGE = /\.(jpe?g|png|gif|webp|bmp|avif)(\?|$)/i;
+
 function previewSrc(post: ResolvedPost): string | undefined {
   if (post.postType === "image" || post.postType === "gallery") {
-    return post.assets[0]?.url;
+    const first = post.assets[0]?.url;
+    // A direct image renders in <img>; a video asset (e.g. redgifs mp4) does
+    // not, so fall back to Reddit's static thumbnail.
+    if (first && DISPLAYABLE_IMAGE.test(first)) return first;
+    return post.thumbnail;
   }
   if (post.postType === "video") return post.thumbnail;
   return undefined;

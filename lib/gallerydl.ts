@@ -124,6 +124,21 @@ const Kw = z
     domain: z.string().optional(),
     permalink: z.string().optional(),
     is_video: z.boolean().optional(),
+    // Reddit's generated preview image — a static thumbnail even for videos and
+    // redgifs (where the asset itself is an mp4 and can't go in an <img>).
+    thumbnail: z.string().optional(),
+    preview: z
+      .object({
+        images: z
+          .array(
+            z
+              .object({ source: z.object({ url: z.string() }).passthrough().optional() })
+              .passthrough(),
+          )
+          .optional(),
+      })
+      .passthrough()
+      .nullish(),
     // Reddit sends `null` (not absent) for these on non-video posts -> nullish.
     media: z.object({ reddit_video: RedditVideo.optional() }).passthrough().nullish(),
     secure_media: z.object({ reddit_video: RedditVideo.optional() }).passthrough().nullish(),
@@ -204,6 +219,11 @@ function normalize(rawUrl: string, meta: Kw, urls: UrlEntry[]): ResolvedPost {
     ? `https://www.reddit.com${meta.permalink}`.replace(/\/+$/, "")
     : rawUrl;
 
+  // Prefer Reddit's generated preview image; fall back to the `thumbnail` field
+  // only if it's an actual URL (it can be "nsfw"/"default"/"spoiler").
+  const previewImage = meta.preview?.images?.[0]?.source?.url;
+  const thumbField = meta.thumbnail?.startsWith("http") ? meta.thumbnail : undefined;
+
   const base = {
     permalink,
     subreddit: meta.subreddit ?? "unknown",
@@ -211,6 +231,7 @@ function normalize(rawUrl: string, meta: Kw, urls: UrlEntry[]): ResolvedPost {
     domain: meta.domain ?? hostnameOf(urls[0]?.url) ?? "",
     isNsfw: meta.over_18 ?? false,
     score: typeof meta.score === "number" ? meta.score : null,
+    thumbnail: previewImage ?? thumbField,
   };
 
   const isVideo =
