@@ -15,6 +15,9 @@
  * gallery-dl (see `gallery-dl -j <reddit-url>`).
  */
 import { execFile } from "node:child_process";
+import { mkdtemp, readdir, rm, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
 import { RedditFetchError } from "@/lib/reddit/errors";
@@ -25,7 +28,20 @@ const execFileAsync = promisify(execFile);
 /** Binary on PATH in dev; in Docker we point this at the standalone binary. */
 const GALLERY_DL = process.env.GALLERY_DL_PATH || "gallery-dl";
 const EXTRACT_TIMEOUT_MS = 60_000;
+const DOWNLOAD_TIMEOUT_MS = 4 * 60 * 1000;
 const MAX_OUTPUT_BYTES = 32 * 1024 * 1024;
+
+export interface DownloadedFile {
+  path: string;
+  sizeBytes: number;
+}
+
+export interface DownloadedMedia {
+  dir: string;
+  /** In post order (gallery index). */
+  files: DownloadedFile[];
+  cleanup: () => Promise<void>;
+}
 
 /**
  * Reddit fronts its API with a bot-detection WAF that blocks datacenter IPs and
@@ -231,6 +247,49 @@ function normalize(rawUrl: string, meta: Kw, urls: UrlEntry[]): ResolvedPost {
       ? `gallery-dl no encontró media descargable (dominio: ${base.domain}).`
       : "gallery-dl no encontró media descargable en este post.",
   };
+}
+
+/**
+ * Strategy B download: have gallery-dl fetch all of a post's media into a fresh
+ * temp dir, returning the files (in gallery order) with sizes. gallery-dl does
+ * the fetching, so this works for any host it supports (i.redd.it, redgifs,
+ * imgur, …) — no per-host allowlist needed, unlike the old CDN proxy.
+ *
+ * v.redd.it videos are NOT downloaded here; they stay on the yt-dlp path
+ * (DASH+audio merge). The caller routes by post type.
+ *
+ * The returned `cleanup` MUST be called once the files have been served.
+ */
+export async function downloadMedia(rawUrl: string): Promise<DownloadedMedia> {
+  const dir = await mkdtemp(join(tmpdir(), "reddit-gdl-"));
+  const cleanup = async () => {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  };
+
+  try {
+    // `{num}` is gallery-dl's per-file index, so names sort back into post order.
+    await execFileAsync(
+      GALLERY_DL,
+      [...authArgs(), "-D", dir, "-f", "{num}.{extension}", "--", rawUrl],
+      { timeout: DOWNLOAD_TIMEOUT_MS, maxBuffer: MAX_OUTPUT_BYTES },
+    );
+
+    const names = (await readdir(dir)).filter((n) => !n.startsWith("."));
+    names.sort((a, b) => (parseInt(a, 10) || 0) - (parseInt(b, 10) || 0));
+    const files = await Promise.all(
+      names.map(async (n) => {
+        const path = join(dir, n);
+        return { path, sizeBytes: (await stat(path)).size };
+      }),
+    );
+    if (files.length === 0) {
+      throw new RedditFetchError("invalid_response", "gallery-dl no descargó ningún archivo.");
+    }
+    return { dir, files, cleanup };
+  } catch (err) {
+    await cleanup();
+    throw err instanceof RedditFetchError ? err : toFetchError(err);
+  }
 }
 
 /** Run gallery-dl, mapping spawn/exit failures to typed `RedditFetchError`s. */

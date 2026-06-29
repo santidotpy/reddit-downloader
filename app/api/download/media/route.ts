@@ -1,27 +1,36 @@
 /**
  * GET /api/download/media?job=&item=&i=
  *
- * Proxies a single image / gallery asset and serves it with a sanitized
- * Content-Disposition filename. The URL is read from server-held job state (not
- * from the client) and the host must be a Reddit media CDN — so this can't be
- * abused as an open proxy. The upstream body is streamed, never buffered.
+ * Strategy B: the post's media was downloaded by gallery-dl (see
+ * `lib/download-cache.ts`); we stream the i-th file straight from the temp dir
+ * with a sanitized Content-Disposition. Because gallery-dl did the fetching,
+ * this works for any host it supports (i.redd.it, redgifs, imgur, …) — there is
+ * no per-host allowlist and the server never fetches a client-supplied URL.
+ * v.redd.it videos use the dedicated video route instead.
  */
 import type { NextRequest } from "next/server";
+import { createReadStream } from "node:fs";
+import { extname } from "node:path";
+import { Readable } from "node:stream";
 import { getJob } from "@/lib/queue";
-import { isRedditMediaHost } from "@/lib/reddit/url";
-import { getRedditUserAgent } from "@/lib/reddit/user-agent";
-import {
-  contentDisposition,
-  extFromMime,
-  extFromUrl,
-  sanitizeFilename,
-} from "@/lib/filename";
+import { getItemMedia } from "@/lib/download-cache";
+import { contentDisposition, sanitizeFilename } from "@/lib/filename";
 import { logDownloadEvent } from "@/lib/db/log";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 300;
 
-const FETCH_TIMEOUT_MS = 30_000;
+const CONTENT_TYPES: Record<string, string> = {
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".png": "image/png",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".mp4": "video/mp4",
+  ".webm": "video/webm",
+  ".mov": "video/quicktime",
+};
 
 export async function GET(req: NextRequest) {
   const start = Date.now();
@@ -37,73 +46,51 @@ export async function GET(req: NextRequest) {
 
   const item = getJob(jobId)?.items.find((i) => i.id === itemId);
   if (!item?.post) return new Response("Ítem no encontrado.", { status: 404 });
+  if (item.post.postType === "video") {
+    return new Response("Usá el endpoint de video para este ítem.", { status: 400 });
+  }
 
-  const asset = item.post.assets[index];
-  if (!asset) return new Response("Asset no encontrado.", { status: 404 });
-
-  let target: URL;
+  let media;
   try {
-    target = new URL(asset.url);
+    media = await getItemMedia(itemId, item.post.permalink);
   } catch {
-    return new Response("URL de media inválida.", { status: 400 });
-  }
-  if (!isRedditMediaHost(target.hostname)) {
-    return new Response("Host no permitido.", { status: 403 });
+    return new Response("No se pudo descargar el archivo.", { status: 502 });
   }
 
-  let upstream: Response;
-  try {
-    upstream = await fetch(target, {
-      headers: { "user-agent": getRedditUserAgent() },
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-    });
-  } catch {
-    return new Response("No se pudo obtener el archivo.", { status: 502 });
-  }
-  if (!upstream.ok || !upstream.body) {
-    return new Response("No se pudo obtener el archivo.", { status: 502 });
-  }
+  const file = media.files[index];
+  if (!file) return new Response("Asset no encontrado.", { status: 404 });
 
-  const ext =
-    extFromUrl(asset.url) ||
-    extFromMime(asset.mimeType) ||
-    extFromMime(upstream.headers.get("content-type"));
-  const suffix = item.post.assets.length > 1 ? `-${index + 1}` : "";
-  const filename = `${sanitizeFilename(item.post.title)}${suffix}${ext}`;
-
-  const headers = new Headers();
-  headers.set(
-    "content-type",
-    upstream.headers.get("content-type") ?? asset.mimeType ?? "application/octet-stream",
-  );
-  const length = upstream.headers.get("content-length");
-  if (length) headers.set("content-length", length);
-  headers.set("content-disposition", contentDisposition(filename));
-  headers.set("cache-control", "no-store");
-
-  // Count bytes as they stream through and log an anonymous event once the
-  // download actually completes (flush). Aborted downloads aren't logged.
   const post = item.post;
-  let bytes = 0;
-  const counter = new TransformStream<Uint8Array, Uint8Array>({
-    transform(chunk, controller) {
-      bytes += chunk.byteLength;
-      controller.enqueue(chunk);
-    },
-    flush() {
-      void logDownloadEvent({
-        post,
-        status: "success",
-        fileSizeBytes: bytes,
-        mediaCount: 1,
-        hasAudio: false,
-        durationSeconds: null,
-        width: asset.width ?? null,
-        height: asset.height ?? null,
-        processingMs: Date.now() - start,
-      });
-    },
+  const ext = extname(file.path).toLowerCase();
+  const suffix = media.files.length > 1 ? `-${index + 1}` : "";
+  const filename = `${sanitizeFilename(post.title)}${suffix}${ext}`;
+
+  // The temp dir is owned by the download cache (TTL eviction), so we do NOT
+  // clean up on stream close — other asset indices may still need these files.
+  const nodeStream = createReadStream(file.path);
+  nodeStream.once("error", () => nodeStream.destroy());
+  req.signal.addEventListener("abort", () => nodeStream.destroy());
+  nodeStream.once("end", () => {
+    void logDownloadEvent({
+      post,
+      status: "success",
+      fileSizeBytes: file.sizeBytes,
+      mediaCount: 1,
+      hasAudio: false,
+      durationSeconds: null,
+      width: post.assets[index]?.width ?? null,
+      height: post.assets[index]?.height ?? null,
+      processingMs: Date.now() - start,
+    });
   });
 
-  return new Response(upstream.body.pipeThrough(counter), { headers });
+  const webStream = Readable.toWeb(nodeStream) as ReadableStream<Uint8Array>;
+  return new Response(webStream, {
+    headers: {
+      "content-type": CONTENT_TYPES[ext] ?? "application/octet-stream",
+      "content-length": String(file.sizeBytes),
+      "content-disposition": contentDisposition(filename),
+      "cache-control": "no-store",
+    },
+  });
 }

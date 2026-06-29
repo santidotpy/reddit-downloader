@@ -2,33 +2,25 @@
  * POST /api/download/zip  { jobId, itemIds }
  *
  * Streams a ZIP of the requested items (a single gallery, or multiple posts).
- * Image/gallery assets are streamed straight from the Reddit CDN into the
- * archive; videos are merged via yt-dlp to a temp file, added, then cleaned up
- * once the archive is fully flushed. Per-asset failures are skipped, not fatal.
+ * Image/gallery/external assets are taken from the gallery-dl download (Strategy
+ * B, see `lib/download-cache.ts`); v.redd.it videos are merged via yt-dlp to a
+ * temp file. Per-item failures are skipped, not fatal.
  */
 import type { NextRequest } from "next/server";
 import { Readable } from "node:stream";
-import type { ReadableStream as NodeReadableStream } from "node:stream/web";
+import { extname } from "node:path";
 import { stat } from "node:fs/promises";
 import { ZipArchive } from "archiver";
 import { z } from "zod";
 import { getJob } from "@/lib/queue";
-import { isRedditMediaHost } from "@/lib/reddit/url";
-import { getRedditUserAgent } from "@/lib/reddit/user-agent";
+import { getItemMedia } from "@/lib/download-cache";
 import { downloadVideo } from "@/lib/ytdlp";
-import {
-  contentDisposition,
-  extFromMime,
-  extFromUrl,
-  sanitizeFilename,
-} from "@/lib/filename";
+import { contentDisposition, sanitizeFilename } from "@/lib/filename";
 import { logDownloadEvent, type DownloadLog } from "@/lib/db/log";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
-
-const FETCH_TIMEOUT_MS = 30_000;
 
 const bodySchema = z.object({
   jobId: z.string().min(1),
@@ -98,44 +90,29 @@ export async function POST(req: NextRequest) {
           continue;
         }
 
-        // image or gallery
-        let itemBytes = 0;
-        let added = 0;
-        for (let idx = 0; idx < post.assets.length; idx++) {
-          const asset = post.assets[idx];
-          let url: URL;
-          try {
-            url = new URL(asset.url);
-          } catch {
-            continue;
-          }
-          if (!isRedditMediaHost(url.hostname)) continue;
-
-          try {
-            const res = await fetch(url, {
-              headers: { "user-agent": getRedditUserAgent() },
-              signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-            });
-            if (!res.ok || !res.body) continue;
-            const ext = extFromUrl(asset.url) || extFromMime(asset.mimeType);
-            const suffix = post.assets.length > 1 ? `-${idx + 1}` : "";
-            // fetch returns a DOM ReadableStream; Readable.fromWeb wants Node's.
-            archive.append(
-              Readable.fromWeb(res.body as unknown as NodeReadableStream),
-              { name: uniqueName(usedNames, `${base}${suffix}${ext}`) },
-            );
-            added += 1;
-            itemBytes += Number(res.headers.get("content-length") ?? 0);
-          } catch {
-            continue;
-          }
+        // image / gallery / external: served from the gallery-dl download. The
+        // temp dir is owned by the download cache (TTL), so no cleanup here.
+        let media;
+        try {
+          media = await getItemMedia(item.id, post.permalink);
+        } catch {
+          continue;
         }
-        if (added > 0) {
+        let itemBytes = 0;
+        media.files.forEach((file, idx) => {
+          const ext = extname(file.path);
+          const suffix = media.files.length > 1 ? `-${idx + 1}` : "";
+          archive.file(file.path, {
+            name: uniqueName(usedNames, `${base}${suffix}${ext}`),
+          });
+          itemBytes += file.sizeBytes;
+        });
+        if (media.files.length > 0) {
           pending.push({
             post,
             status: "success",
             fileSizeBytes: itemBytes,
-            mediaCount: added,
+            mediaCount: media.files.length,
             hasAudio: false,
             durationSeconds: null,
             width: post.assets[0]?.width ?? null,
@@ -149,7 +126,7 @@ export async function POST(req: NextRequest) {
     }
   })();
 
-  // Once the archive is fully written: clean up temp dirs and log events.
+  // Once the archive is fully written: clean up video temp dirs and log events.
   archive.on("end", () => {
     void Promise.all(cleanups.map((c) => c()));
     const processingMs = Date.now() - start;
