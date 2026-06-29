@@ -12,7 +12,7 @@
 import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import youtubedl from "youtube-dl-exec";
+import youtubedl, { create as createYoutubeDl } from "youtube-dl-exec";
 import ffmpegStatic from "ffmpeg-static";
 
 export interface VideoDownload {
@@ -22,6 +22,15 @@ export interface VideoDownload {
 
 const DOWNLOAD_TIMEOUT_MS = 4 * 60 * 1000;
 
+// In production (Docker) use the system yt-dlp + ffmpeg via env vars — the
+// standalone Next build doesn't copy node_modules binaries, and the system
+// yt-dlp binary needs no Python. In dev, fall back to the bundled binaries.
+const ytdlp = process.env.YT_DLP_PATH
+  ? createYoutubeDl(process.env.YT_DLP_PATH)
+  : youtubedl;
+
+const ffmpegLocation = process.env.FFMPEG_PATH || ffmpegStatic || undefined;
+
 /** Download + merge a Reddit video to a temp file. Throws on failure (after cleanup). */
 export async function downloadVideo(permalink: string): Promise<VideoDownload> {
   const dir = await mkdtemp(join(tmpdir(), "reddit-dl-"));
@@ -30,14 +39,14 @@ export async function downloadVideo(permalink: string): Promise<VideoDownload> {
   };
 
   try {
-    await youtubedl(permalink, {
+    await ytdlp(permalink, {
       output: join(dir, "video.%(ext)s"),
       format: "bestvideo*+bestaudio/best",
       mergeOutputFormat: "mp4",
       noPlaylist: true,
       noWarnings: true,
       retries: 3,
-      ...(ffmpegStatic ? { ffmpegLocation: ffmpegStatic } : {}),
+      ...(ffmpegLocation ? { ffmpegLocation } : {}),
     });
 
     const files = await readdir(dir);

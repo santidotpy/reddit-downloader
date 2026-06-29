@@ -5,22 +5,32 @@
  * in `media_metadata` are directly usable without HTML-entity decoding.
  */
 import { getRedditUserAgent } from "./user-agent";
+import { getRedditAccessToken } from "./auth";
 import { RedditFetchError } from "./errors";
 import { listingResponseSchema, type RedditPostData } from "./schema";
 
 const REQUEST_TIMEOUT_MS = 15_000;
 
 export async function fetchPostJson(permalink: string): Promise<RedditPostData> {
-  const base = permalink.replace(/\/+$/, "");
-  const jsonUrl = `${base}.json?raw_json=1`;
+  // With OAuth configured, use the authenticated host (oauth.reddit.com), which
+  // is not subject to the unauthenticated .json 403 blocking.
+  const token = await getRedditAccessToken();
+  const { pathname } = new URL(permalink);
+  const path = pathname.replace(/\/+$/, "");
+  const origin = token ? "https://oauth.reddit.com" : "https://www.reddit.com";
+  const jsonUrl = `${origin}${path}.json?raw_json=1`;
+
+  const headers: Record<string, string> = {
+    "user-agent": getRedditUserAgent(),
+    accept: "application/json",
+    "accept-language": "en-US,en;q=0.9",
+  };
+  if (token) headers.authorization = `Bearer ${token}`;
 
   let res: Response;
   try {
     res = await fetch(jsonUrl, {
-      headers: {
-        "user-agent": getRedditUserAgent(),
-        accept: "application/json",
-      },
+      headers,
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
   } catch (cause) {
@@ -47,7 +57,9 @@ export async function fetchPostJson(permalink: string): Promise<RedditPostData> 
     case 403:
       throw new RedditFetchError(
         "forbidden",
-        "Acceso denegado por Reddit (403): puede ser un subreddit privado o con restricción.",
+        token
+          ? "Acceso denegado por Reddit (403): el post puede ser privado, NSFW restringido o quarantined."
+          : "Acceso denegado por Reddit (403). Reddit bloquea el acceso no autenticado: configurá REDDIT_CLIENT_ID y REDDIT_CLIENT_SECRET (OAuth).",
       );
   }
   if (!res.ok) {

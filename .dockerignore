@@ -1,0 +1,16 @@
+node_modules
+.next
+.git
+.github
+npm-debug.log*
+.env
+.env.*
+!.env.example
+.DS_Store
+*.local
+.vscode
+.idea
+.agents
+.claude
+README.md
+drizzle.config.ts
