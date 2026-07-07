@@ -11,6 +11,7 @@ import type { NextRequest } from "next/server";
 import { z } from "zod";
 import { detectRedditUrls } from "@/lib/reddit";
 import { createJob } from "@/lib/queue";
+import { parseRedditCookies } from "@/lib/reddit-cookies";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,6 +20,9 @@ const MAX_URLS = 25;
 
 const bodySchema = z.object({
   text: z.string().min(1).max(20_000),
+  // Optional per-session Reddit cookies pasted in the UI. Parsed + whitelisted,
+  // held only in memory for this job, never persisted or logged.
+  cookies: z.string().max(64_000).optional(),
 });
 
 export async function POST(req: NextRequest) {
@@ -45,7 +49,11 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const job = createJob(urls.slice(0, MAX_URLS));
+  const cookies = parsed.data.cookies ? parseRedditCookies(parsed.data.cookies) : undefined;
+  const job = createJob(
+    urls.slice(0, MAX_URLS),
+    cookies && Object.keys(cookies).length > 0 ? cookies : undefined,
+  );
 
   return Response.json(
     {

@@ -8,10 +8,14 @@
  * longer on the hot path.
  */
 import { extractPost } from "@/lib/gallerydl";
+import type { RedditCookies } from "@/lib/reddit-cookies";
 import type { ResolvedPost } from "./types";
 
-export async function processRedditUrl(rawUrl: string): Promise<ResolvedPost> {
-  return extractPost(rawUrl);
+export async function processRedditUrl(
+  rawUrl: string,
+  cookies?: RedditCookies,
+): Promise<ResolvedPost> {
+  return extractPost(rawUrl, cookies);
 }
 
 export * from "./types";

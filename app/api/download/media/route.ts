@@ -14,6 +14,7 @@ import { extname } from "node:path";
 import { Readable } from "node:stream";
 import { getJob } from "@/lib/queue";
 import { getItemMedia } from "@/lib/download-cache";
+import { getSessionCookies } from "@/lib/reddit-cookies";
 import { contentDisposition, sanitizeFilename } from "@/lib/filename";
 import { logDownloadEvent } from "@/lib/db/log";
 
@@ -52,7 +53,7 @@ export async function GET(req: NextRequest) {
 
   let media;
   try {
-    media = await getItemMedia(itemId, item.post.permalink);
+    media = await getItemMedia(itemId, item.post.permalink, getSessionCookies(jobId));
   } catch {
     return new Response("No se pudo descargar el archivo.", { status: 502 });
   }

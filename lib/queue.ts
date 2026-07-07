@@ -14,6 +14,12 @@ import PQueue from "p-queue";
 import { EventEmitter } from "node:events";
 import { processRedditUrl } from "@/lib/reddit";
 import { NonRedditHostError, RedditFetchError } from "@/lib/reddit/errors";
+import {
+  clearSessionCookies,
+  getSessionCookies,
+  storeSessionCookies,
+  type RedditCookies,
+} from "@/lib/reddit-cookies";
 import type { Job, JobItemError } from "@/lib/job-types";
 
 export type { ItemStatus, Job, JobItem, JobItemError } from "@/lib/job-types";
@@ -66,12 +72,23 @@ function toItemError(err: unknown): JobItemError {
 function sweep(state: QueueState): void {
   const now = Date.now();
   for (const [id, job] of state.jobs) {
-    if (now - job.createdAt > JOB_TTL_MS) state.jobs.delete(id);
+    if (now - job.createdAt > JOB_TTL_MS) {
+      state.jobs.delete(id);
+      // Drop any in-memory session cookies tied to this job alongside it.
+      clearSessionCookies(id);
+    }
   }
 }
 
-/** Create a job for the given URLs and enqueue each item for processing. */
-export function createJob(rawUrls: string[]): Job {
+/**
+ * Create a job for the given URLs and enqueue each item for processing.
+ *
+ * `cookies` (optional) are the per-session Reddit cookies from the paste /
+ * bookmarklet UI flows. They are held in a separate in-memory store keyed by
+ * job id — NOT on the `Job` (which is serialized into SSE frames) — so the later
+ * download requests for this job can reuse them without the client re-sending.
+ */
+export function createJob(rawUrls: string[], cookies?: RedditCookies): Job {
   const state = getState();
   sweep(state);
 
@@ -85,13 +102,14 @@ export function createJob(rawUrls: string[]): Job {
     })),
   };
   state.jobs.set(job.id, job);
+  if (cookies) storeSessionCookies(job.id, cookies);
 
   for (const item of job.items) {
     void state.queue.add(async () => {
       item.status = "processing";
       emit(state, job);
       try {
-        item.post = await processRedditUrl(item.rawUrl);
+        item.post = await processRedditUrl(item.rawUrl, getSessionCookies(job.id));
         item.status = "ready";
       } catch (err) {
         item.status = "failed";

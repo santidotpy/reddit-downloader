@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { UrlInput } from "@/components/url-input";
+import { RedditAuth } from "@/components/reddit-auth";
 import { MediaGrid } from "@/components/media-grid";
 import { DownloadAllButton } from "@/components/download-all-button";
 import { Progress } from "@/components/ui/progress";
@@ -16,11 +17,18 @@ interface ExtractResponse {
   items: Job["items"];
 }
 
-async function postExtract(text: string): Promise<ExtractResponse> {
+interface ExtractArgs {
+  text: string;
+  cookies: string;
+}
+
+async function postExtract({ text, cookies }: ExtractArgs): Promise<ExtractResponse> {
   const res = await fetch("/api/extract", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ text }),
+    // Cookies are sent only with this request and only if provided; the server
+    // holds them in memory for this job and never persists or logs them.
+    body: JSON.stringify(cookies.trim() ? { text, cookies } : { text }),
   });
   const data: unknown = await res.json().catch(() => ({}));
   if (!res.ok) {
@@ -36,6 +44,8 @@ async function postExtract(text: string): Promise<ExtractResponse> {
 export function Downloader() {
   const queryClient = useQueryClient();
   const [jobId, setJobId] = useState<string | null>(null);
+  // Held only in client component state — never written to localStorage/etc.
+  const [cookies, setCookies] = useState("");
   const job = useJobStream(jobId);
 
   const mutation = useMutation({
@@ -60,9 +70,11 @@ export function Downloader() {
   return (
     <div className="flex flex-col gap-8">
       <UrlInput
-        onSubmit={(text) => mutation.mutate(text)}
+        onSubmit={(text) => mutation.mutate({ text, cookies })}
         isPending={mutation.isPending}
       />
+
+      <RedditAuth value={cookies} onChange={setCookies} />
 
       {job && job.items.length > 0 && (
         <section className="flex flex-col gap-4">

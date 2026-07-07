@@ -8,6 +8,7 @@
  * a TTL. Lives on `globalThis` so it survives HMR in dev, like the job queue.
  */
 import { downloadMedia, type DownloadedMedia } from "@/lib/gallerydl";
+import type { RedditCookies } from "@/lib/reddit-cookies";
 
 const TTL_MS = 15 * 60 * 1000;
 
@@ -32,12 +33,16 @@ function getCache(): Map<string, Entry> {
  * callers for the same item share the same temp dir; it's cleaned up TTL_MS
  * after the first request.
  */
-export function getItemMedia(itemId: string, rawUrl: string): Promise<DownloadedMedia> {
+export function getItemMedia(
+  itemId: string,
+  rawUrl: string,
+  cookies?: RedditCookies,
+): Promise<DownloadedMedia> {
   const cache = getCache();
   const existing = cache.get(itemId);
   if (existing) return existing.media;
 
-  const media = downloadMedia(rawUrl);
+  const media = downloadMedia(rawUrl, cookies);
   const timer = setTimeout(() => {
     cache.delete(itemId);
     void media.then((m) => m.cleanup()).catch(() => {});

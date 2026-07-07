@@ -14,6 +14,7 @@ import { ZipArchive } from "archiver";
 import { z } from "zod";
 import { getJob } from "@/lib/queue";
 import { getItemMedia } from "@/lib/download-cache";
+import { getSessionCookies } from "@/lib/reddit-cookies";
 import { downloadVideo } from "@/lib/ytdlp";
 import { contentDisposition, sanitizeFilename } from "@/lib/filename";
 import { logDownloadEvent, type DownloadLog } from "@/lib/db/log";
@@ -35,6 +36,7 @@ export async function POST(req: NextRequest) {
 
   const job = getJob(parsed.data.jobId);
   if (!job) return Response.json({ error: "Job no encontrado." }, { status: 404 });
+  const sessionCookies = getSessionCookies(parsed.data.jobId);
 
   const wanted = new Set(parsed.data.itemIds);
   const items = job.items.filter(
@@ -94,7 +96,7 @@ export async function POST(req: NextRequest) {
         // temp dir is owned by the download cache (TTL), so no cleanup here.
         let media;
         try {
-          media = await getItemMedia(item.id, post.permalink);
+          media = await getItemMedia(item.id, post.permalink, sessionCookies);
         } catch {
           continue;
         }

@@ -22,6 +22,11 @@ import { promisify } from "node:util";
 import { z } from "zod";
 import { RedditFetchError } from "@/lib/reddit/errors";
 import type { MediaAsset, ResolvedPost } from "@/lib/reddit/types";
+import {
+  redactCookieValues,
+  toGalleryDlCookieArgs,
+  type RedditCookies,
+} from "@/lib/reddit-cookies";
 
 const execFileAsync = promisify(execFile);
 
@@ -56,7 +61,7 @@ export interface DownloadedMedia {
  *   GALLERY_DL_COOKIES    - path to a browser cookies.txt (strongest bypass)
  *   GALLERY_DL_CONFIG     - explicit config file (overrides default discovery)
  */
-function authArgs(): string[] {
+function authArgs(cookies?: RedditCookies): string[] {
   const args: string[] = [];
   if (process.env.GALLERY_DL_CONFIG) {
     args.push("--config", process.env.GALLERY_DL_CONFIG);
@@ -76,6 +81,14 @@ function authArgs(): string[] {
     if (process.env.REDDIT_CLIENT_ID) {
       args.push("-o", `extractor.reddit.client-id=${process.env.REDDIT_CLIENT_ID}`);
     }
+  }
+  // Per-request cookies (from the paste / bookmarklet UI flows) take precedence
+  // over the file/browser env levers and are injected purely in-memory as
+  // `-o cookies.<name>="<value>"` — nothing touches disk. When present, we do
+  // NOT also pass a cookies file/browser source, so the two don't conflict.
+  if (cookies && Object.keys(cookies).length > 0) {
+    args.push(...toGalleryDlCookieArgs(cookies));
+    return args;
   }
   if (process.env.GALLERY_DL_COOKIES) {
     args.push("--cookies", process.env.GALLERY_DL_COOKIES);
@@ -165,12 +178,19 @@ interface UrlEntry {
  * Extract a Reddit post's media metadata via gallery-dl. No bytes are
  * downloaded — this feeds the live cards and most of the analytics.
  */
-export async function extractPost(rawUrl: string): Promise<ResolvedPost> {
-  return extractAt(rawUrl, 0);
+export async function extractPost(
+  rawUrl: string,
+  cookies?: RedditCookies,
+): Promise<ResolvedPost> {
+  return extractAt(rawUrl, 0, cookies);
 }
 
-async function extractAt(rawUrl: string, depth: number): Promise<ResolvedPost> {
-  const stdout = await runGalleryDl(["-j", "--", rawUrl]);
+async function extractAt(
+  rawUrl: string,
+  depth: number,
+  cookies?: RedditCookies,
+): Promise<ResolvedPost> {
+  const stdout = await runGalleryDl(["-j", "--", rawUrl], cookies);
 
   let parsed: unknown;
   try {
@@ -204,7 +224,7 @@ async function extractAt(rawUrl: string, depth: number): Promise<ResolvedPost> {
   // follow it. More than one queued URL means a listing/multi-post page, which
   // is out of scope (we resolve single posts only).
   if (urls.length === 0 && queued.length === 1 && depth < MAX_RESOLVE_DEPTH) {
-    return extractAt(queued[0], depth + 1);
+    return extractAt(queued[0], depth + 1, cookies);
   }
 
   // Fall back to the first file's kwdict for post-level fields if there was no
@@ -281,7 +301,10 @@ function normalize(rawUrl: string, meta: Kw, urls: UrlEntry[]): ResolvedPost {
  *
  * The returned `cleanup` MUST be called once the files have been served.
  */
-export async function downloadMedia(rawUrl: string): Promise<DownloadedMedia> {
+export async function downloadMedia(
+  rawUrl: string,
+  cookies?: RedditCookies,
+): Promise<DownloadedMedia> {
   const dir = await mkdtemp(join(tmpdir(), "reddit-gdl-"));
   const cleanup = async () => {
     await rm(dir, { recursive: true, force: true }).catch(() => {});
@@ -291,7 +314,7 @@ export async function downloadMedia(rawUrl: string): Promise<DownloadedMedia> {
     // `{num}` is gallery-dl's per-file index, so names sort back into post order.
     await execFileAsync(
       GALLERY_DL,
-      [...authArgs(), "-D", dir, "-f", "{num}.{extension}", "--", rawUrl],
+      [...authArgs(cookies), "-D", dir, "-f", "{num}.{extension}", "--", rawUrl],
       { timeout: DOWNLOAD_TIMEOUT_MS, maxBuffer: MAX_OUTPUT_BYTES },
     );
 
@@ -314,32 +337,42 @@ export async function downloadMedia(rawUrl: string): Promise<DownloadedMedia> {
 }
 
 /** Run gallery-dl, mapping spawn/exit failures to typed `RedditFetchError`s. */
-async function runGalleryDl(args: string[]): Promise<string> {
+async function runGalleryDl(args: string[], cookies?: RedditCookies): Promise<string> {
   const debug = process.env.NODE_ENV !== "production";
   if (debug) {
-    // Which auth levers the app process actually sees (no secrets), so we can
-    // tell whether the cookies flag reached gallery-dl at all.
+    // Which auth levers the app process actually sees (no secrets, only cookie
+    // NAMES for the per-request set — never values), so we can tell whether the
+    // cookies reached gallery-dl at all.
     console.error("[gallery-dl] auth:", {
       cookiesFromBrowser: process.env.GALLERY_DL_COOKIES_FROM_BROWSER ?? null,
       cookiesFile: process.env.GALLERY_DL_COOKIES ?? null,
       config: process.env.GALLERY_DL_CONFIG ?? null,
       oauth: Boolean(process.env.REDDIT_REFRESH_TOKEN),
+      sessionCookies: cookies ? Object.keys(cookies) : null,
     });
   }
   try {
-    const { stdout, stderr } = await execFileAsync(GALLERY_DL, [...authArgs(), ...args], {
-      timeout: EXTRACT_TIMEOUT_MS,
-      maxBuffer: MAX_OUTPUT_BYTES,
-    });
+    const { stdout, stderr } = await execFileAsync(
+      GALLERY_DL,
+      [...authArgs(cookies), ...args],
+      { timeout: EXTRACT_TIMEOUT_MS, maxBuffer: MAX_OUTPUT_BYTES },
+    );
     // gallery-dl logs "[cookies][info] Extracted N cookies from Chrome" (or a
     // warning if it couldn't read them) to stderr — the decisive diagnostic.
-    if (debug && stderr.trim()) console.error("[gallery-dl] stderr:", stderr.trim());
+    // Redact any pasted cookie values before logging, just in case.
+    if (debug && stderr.trim()) {
+      console.error("[gallery-dl] stderr:", redactCookieValues(stderr.trim(), cookies));
+    }
     return stdout;
   } catch (err) {
     if (debug) {
       const e = err as { stderr?: string };
-      if (e?.stderr?.trim()) console.error("[gallery-dl] stderr:", e.stderr.trim());
+      if (e?.stderr?.trim()) {
+        console.error("[gallery-dl] stderr:", redactCookieValues(e.stderr.trim(), cookies));
+      }
     }
+    // NOTE: never log the raw error object — `execFile`'s error carries a `.cmd`
+    // string with the full command line, which includes the cookie values.
     throw toFetchError(err);
   }
 }
