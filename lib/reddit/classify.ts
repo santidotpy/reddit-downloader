@@ -3,6 +3,7 @@
  * its direct media. `external` posts are returned (not thrown) with an
  * `unsupportedReason` so the UI can show them gracefully.
  */
+import { untitledPostTitle } from "@/lib/filename";
 import type { RedditPostData } from "./schema";
 import type { MediaAsset, ResolvedPost } from "./types";
 
@@ -15,7 +16,7 @@ export function classifyPost(
   const base = {
     permalink,
     subreddit: post.subreddit ?? "unknown",
-    title: post.title ?? "reddit-post",
+    title: post.title ?? untitledPostTitle(permalink, post.id),
     domain: post.domain ?? hostnameOf(directUrl(post)) ?? "",
     isNsfw: post.over_18 ?? false,
     score: typeof post.score === "number" ? post.score : null,

@@ -39,6 +39,7 @@ const redditVideoSchema = z
 
 export const redditPostDataSchema = z
   .object({
+    id: z.string().optional(),
     subreddit: z.string().optional(),
     title: z.string().optional(),
     over_18: z.boolean().optional(),

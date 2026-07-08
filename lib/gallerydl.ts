@@ -20,6 +20,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
+import { untitledPostTitle } from "@/lib/filename";
 import { RedditFetchError } from "@/lib/reddit/errors";
 import type { MediaAsset, ResolvedPost } from "@/lib/reddit/types";
 import {
@@ -130,6 +131,7 @@ const RedditVideo = z
  */
 const Kw = z
   .object({
+    id: z.string().optional(),
     title: z.string().optional(),
     subreddit: z.string().optional(),
     over_18: z.boolean().optional(),
@@ -247,7 +249,7 @@ function normalize(rawUrl: string, meta: Kw, urls: UrlEntry[]): ResolvedPost {
   const base = {
     permalink,
     subreddit: meta.subreddit ?? "unknown",
-    title: meta.title ?? "reddit-post",
+    title: meta.title ?? untitledPostTitle(permalink, meta.id),
     domain: meta.domain ?? hostnameOf(urls[0]?.url) ?? "",
     isNsfw: meta.over_18 ?? false,
     score: typeof meta.score === "number" ? meta.score : null,
