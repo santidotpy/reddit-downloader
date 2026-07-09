@@ -19,9 +19,9 @@ import { Card, CardContent, CardFooter } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { NsfwBlur } from "@/components/nsfw-blur";
 import {
+  downloadFile,
   downloadZip,
   mediaDownloadUrl,
-  triggerDownload,
   videoDownloadUrl,
 } from "@/lib/client-download";
 import type { JobItem } from "@/lib/job-types";
@@ -215,25 +215,22 @@ function DownloadButton({ item, jobId }: { item: JobItem; jobId: string }) {
   const ready = item.status === "ready" && !!post && post.postType !== "external";
 
   async function handleDownload() {
-    if (!ready || !post) return;
+    if (!ready || !post || busy) return;
 
-    if (post.postType === "video") {
-      triggerDownload(videoDownloadUrl(jobId, item.id));
-      return;
-    }
-    if (post.postType === "gallery") {
-      setBusy(true);
-      try {
+    setBusy(true);
+    try {
+      if (post.postType === "gallery") {
         await downloadZip(jobId, [item.id]);
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : "No se pudo descargar la galería.");
-      } finally {
-        setBusy(false);
+      } else if (post.postType === "video") {
+        await downloadFile(videoDownloadUrl(jobId, item.id));
+      } else {
+        await downloadFile(mediaDownloadUrl(jobId, item.id));
       }
-      return;
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "No se pudo descargar.");
+    } finally {
+      setBusy(false);
     }
-    // single image
-    triggerDownload(mediaDownloadUrl(jobId, item.id));
   }
 
   return (
