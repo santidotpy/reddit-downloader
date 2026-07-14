@@ -30,7 +30,21 @@ pnpm-debug.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
+
+# exported browser cookies (Reddit session — secret, never commit)
+*cookies*.txt
 
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Agents
+/.agents
+/.claude
+CLAUDE.md
+AGENTS.md
+skills-lock.json
+
+# Internal working notes
+DEPLOY-TODO.md

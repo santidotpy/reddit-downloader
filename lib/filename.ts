@@ -1,0 +1,80 @@
+/**
+ * Filename sanitization + Content-Disposition helpers for served downloads.
+ */
+
+const MIME_EXT: Record<string, string> = {
+  "image/jpeg": ".jpg",
+  "image/jpg": ".jpg",
+  "image/png": ".png",
+  "image/gif": ".gif",
+  "image/webp": ".webp",
+  "image/bmp": ".bmp",
+  "video/mp4": ".mp4",
+  "video/webm": ".webm",
+};
+
+// Strip ASCII control chars (0x00-0x1f, 0x7f); keep only printable ASCII (space-tilde).
+const CONTROL_CHARS = /[\x00-\x1f\x7f]/g;
+const NON_ASCII = /[^\x20-\x7e]/g;
+
+/**
+ * Make a post title safe to use as a filename: strip control and
+ * filesystem-illegal characters, collapse whitespace, cap length.
+ */
+export function sanitizeFilename(name: string, fallback = "reddit"): string {
+  const cleaned = name
+    .normalize("NFKD")
+    .replace(CONTROL_CHARS, "")
+    .replace(/[/\\?%*:|"<>]/g, "")
+    .replace(/\s+/g, " ")
+    .replace(/^\.+/, "") // no leading dots (hidden files / traversal)
+    .trim()
+    .slice(0, 120)
+    .trim();
+  return cleaned || fallback;
+}
+
+/** Reddit's base36 post id from a canonical `/…/comments/<id>/…` permalink, or null. */
+export function postIdFromPermalink(permalink: string): string | null {
+  const match = permalink.match(/\/comments\/([a-z0-9]+)/i);
+  return match ? match[1] : null;
+}
+
+/**
+ * Title for a post that has none. Suffixed with the post id so titleless
+ * downloads are unique per post instead of all colliding on "reddit-post".
+ * Prefers the explicit `id` (from the extractor); falls back to parsing the
+ * permalink, then to a bare label if neither yields an id.
+ */
+export function untitledPostTitle(permalink: string, id?: string | null): string {
+  const postId = id || postIdFromPermalink(permalink);
+  return postId ? `reddit-${postId}` : "reddit-post";
+}
+
+/** Extract a `.ext` from a URL path, or "" if none. */
+export function extFromUrl(url: string): string {
+  try {
+    const { pathname } = new URL(url);
+    const match = pathname.match(/\.([a-z0-9]{2,5})$/i);
+    return match ? `.${match[1].toLowerCase()}` : "";
+  } catch {
+    return "";
+  }
+}
+
+/** Map a MIME type to a file extension (handles `type; charset=…`). */
+export function extFromMime(mime?: string | null): string {
+  if (!mime) return "";
+  const base = mime.split(";")[0].trim().toLowerCase();
+  return MIME_EXT[base] ?? "";
+}
+
+/**
+ * Build an RFC 6266 / 5987 Content-Disposition value with an ASCII fallback and
+ * a UTF-8 `filename*` so non-ASCII titles survive.
+ */
+export function contentDisposition(filename: string): string {
+  const asciiFallback = filename.replace(NON_ASCII, "_").replace(/["\\]/g, "_");
+  const encoded = encodeURIComponent(filename);
+  return `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encoded}`;
+}
