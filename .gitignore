@@ -43,5 +43,8 @@ next-env.d.ts
 /.agents
 /.claude
 CLAUDE.md
+AGENTS.md
+skills-lock.json
 
+# Internal working notes
 DEPLOY-TODO.md

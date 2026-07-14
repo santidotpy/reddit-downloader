@@ -44,18 +44,32 @@ ENV NODE_ENV=production \
     PORT=3000 \
     HOSTNAME=0.0.0.0 \
     FFMPEG_PATH=/usr/bin/ffmpeg \
-    YT_DLP_PATH=/usr/local/bin/yt-dlp
+    YT_DLP_PATH=/usr/local/bin/yt-dlp \
+    GALLERY_DL_PATH=/opt/gallery-dl/bin/gallery-dl
 
-# ffmpeg for merging v.redd.it video+audio; yt-dlp standalone linux binary
-# (self-contained, needs no Python) for the actual video download.
+# Three system tools:
+#   gallery-dl — extraction + image/gallery metadata. REQUIRED: it is the only
+#                extraction path (`lib/gallerydl.ts`); without it every job fails.
+#                Unlike yt-dlp it publishes NO standalone binary (PyPI only), so
+#                it needs a Python runtime. We isolate it in a venv rather than
+#                pip-installing into the system interpreter (PEP 668).
+#   yt-dlp     — v.redd.it video download. Standalone build, needs no Python.
+#   ffmpeg     — merges the DASH video+audio streams into one file.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ffmpeg ca-certificates curl \
+ && apt-get install -y --no-install-recommends \
+      ffmpeg ca-certificates curl python3 python3-venv \
  && curl -fL https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux \
       -o /usr/local/bin/yt-dlp \
  && chmod a+rx /usr/local/bin/yt-dlp \
+ && python3 -m venv /opt/gallery-dl \
+ && /opt/gallery-dl/bin/pip install --no-cache-dir --upgrade pip gallery-dl \
  && apt-get purge -y curl \
  && apt-get autoremove -y \
  && rm -rf /var/lib/apt/lists/*
+
+# Fail the build if either tool is missing/unrunnable, rather than shipping an
+# image where every extraction 500s at runtime.
+RUN /opt/gallery-dl/bin/gallery-dl --version && /usr/local/bin/yt-dlp --version
 
 # Run as non-root.
 RUN groupadd --system --gid 1001 nodejs \

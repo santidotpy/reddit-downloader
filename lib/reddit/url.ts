@@ -1,20 +1,17 @@
 /**
- * URL detection + short/share-link resolution for Reddit.
+ * URL detection + host validation for Reddit.
  *
- * Two responsibilities:
- *  1. `detectRedditUrls` — pull every Reddit URL out of arbitrary pasted text.
- *  2. `resolveRedditUrl` — follow short (redd.it/xxx) and share
- *     (reddit.com/r/.../s/xxx) links to their canonical permalink.
+ * `detectRedditUrls` pulls every Reddit URL out of arbitrary pasted text;
+ * `isRedditHost` / `isRedditMediaHost` are the host allowlists.
  *
- * SSRF guard: redirects are followed manually and the host is re-validated as
- * Reddit on EVERY hop. We never follow a redirect to an arbitrary domain.
+ * Short/share-link resolution (redd.it/xxx, reddit.com/r/.../s/xxx) is no longer
+ * done here — gallery-dl resolves those itself (see `lib/gallerydl.ts`).
+ *
+ * SSRF guard: `isRedditMediaHost` gates the download proxy so it can only ever
+ * fetch from a Reddit CDN, never an arbitrary client-supplied domain.
  */
-import { getRedditUserAgent } from "./user-agent";
-import { NonRedditHostError, RedditFetchError } from "./errors";
 
 const REDDIT_BASE_HOSTS = ["reddit.com", "redd.it"] as const;
-const MAX_REDIRECTS = 8;
-const REQUEST_TIMEOUT_MS = 12_000;
 
 /** True if `hostname` is reddit.com / redd.it or a subdomain of either. */
 export function isRedditHost(hostname: string): boolean {
@@ -66,73 +63,4 @@ function normalizeUrl(raw: string): string | null {
   } catch {
     return null;
   }
-}
-
-/** A canonical comments permalink doesn't need redirect resolution. */
-function isCanonicalPermalink(url: URL): boolean {
-  return /\/comments\/[a-z0-9]+/i.test(url.pathname);
-}
-
-/** Drop query/hash and trailing slashes; this is what we append `.json` to. */
-function canonicalizePermalink(url: URL): string {
-  return `https://${url.hostname}${url.pathname}`.replace(/\/+$/, "");
-}
-
-/**
- * Resolve a (possibly short/share) Reddit URL to its canonical permalink by
- * following redirects manually, re-validating the host on each hop.
- *
- * @throws {NonRedditHostError} if any hop leaves Reddit's domains.
- */
-export async function resolveRedditUrl(rawUrl: string): Promise<string> {
-  const normalized = normalizeUrl(rawUrl);
-  if (!normalized) throw new NonRedditHostError(rawUrl);
-
-  let current = new URL(normalized);
-
-  for (let hop = 0; hop < MAX_REDIRECTS; hop++) {
-    // Re-validate every hop (the input may already be off-domain; a redirect
-    // may try to send us off-domain).
-    if (!isRedditHost(current.hostname)) {
-      throw new NonRedditHostError(current.toString());
-    }
-    // Already canonical: no need to spend a request resolving it.
-    if (isCanonicalPermalink(current)) return canonicalizePermalink(current);
-
-    let res: Response;
-    try {
-      res = await fetch(current.toString(), {
-        method: "GET",
-        redirect: "manual",
-        headers: { "user-agent": getRedditUserAgent(), accept: "text/html" },
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-      });
-    } catch (cause) {
-      const timedOut = cause instanceof Error && cause.name === "TimeoutError";
-      throw new RedditFetchError(
-        "network",
-        timedOut
-          ? `Reddit no respondió al resolver el link (timeout): ${current.toString()}`
-          : `No se pudo resolver el link: ${String(cause)}`,
-      );
-    }
-    // We never read the body during resolution — release the socket.
-    await res.body?.cancel().catch(() => {});
-
-    if (res.status >= 300 && res.status < 400) {
-      const location = res.headers.get("location");
-      if (!location) return canonicalizePermalink(current);
-      const next = new URL(location, current);
-      if (!isRedditHost(next.hostname)) {
-        throw new NonRedditHostError(next.toString());
-      }
-      current = next;
-      continue;
-    }
-
-    // Not a redirect — treat the current URL as final.
-    return canonicalizePermalink(current);
-  }
-
-  throw new Error(`Demasiados redirects al resolver la URL: ${rawUrl}`);
 }

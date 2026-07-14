@@ -56,9 +56,9 @@ export interface DownloadedMedia {
  * process doesn't depend on a global gallery-dl config it may not even read.
  *
  * Levers, in increasing order of effectiveness against the WAF:
- *   REDDIT_USER_AGENT     - a descriptive/browser-like UA (Reddit blocks generic ones)
- *   REDDIT_CLIENT_ID +    - app-only / authenticated OAuth -> requests hit
- *   REDDIT_REFRESH_TOKEN    oauth.reddit.com instead of the walled web path
+ *   REDDIT_REFRESH_TOKEN  - authenticated OAuth -> requests hit oauth.reddit.com
+ *                           instead of the walled web path. REDDIT_CLIENT_ID is
+ *                           only forwarded alongside it (see below).
  *   GALLERY_DL_COOKIES    - path to a browser cookies.txt (strongest bypass)
  *   GALLERY_DL_CONFIG     - explicit config file (overrides default discovery)
  */
@@ -68,15 +68,13 @@ function authArgs(cookies?: RedditCookies): string[] {
     args.push("--config", process.env.GALLERY_DL_CONFIG);
   }
   // Deliberately DO NOT override the user-agent: gallery-dl's default reddit UA
-  // is browser-like and passes Reddit's WAF, whereas the legacy REDDIT_USER_AGENT
-  // (Reddit API "app:id:ver" format, for the old pipeline) is bot-shaped and gets
-  // blocked. Override only via an explicit GALLERY_DL_CONFIG if ever needed.
+  // is browser-like and passes Reddit's WAF, whereas a Reddit-API-style UA
+  // ("app:id:ver") is bot-shaped and gets blocked. Override only via an explicit
+  // GALLERY_DL_CONFIG if ever needed.
   // OAuth only: a client-id WITHOUT a matching refresh-token makes gallery-dl
   // attempt (and fail) OAuth -> AuthenticationError, clobbering cookie auth. So
   // only send the reddit OAuth pair when both are present; otherwise let
-  // gallery-dl use its built-in client-id + whatever cookies we passed. The
-  // legacy REDDIT_CLIENT_ID (for the old custom pipeline) is intentionally NOT
-  // forwarded on its own.
+  // gallery-dl use its built-in client-id + whatever cookies we passed.
   if (process.env.REDDIT_REFRESH_TOKEN) {
     args.push("-o", `extractor.reddit.refresh-token=${process.env.REDDIT_REFRESH_TOKEN}`);
     if (process.env.REDDIT_CLIENT_ID) {
@@ -392,7 +390,7 @@ function errorFromAbort(payload: unknown): RedditFetchError {
   ) {
     return new RedditFetchError(
       "forbidden",
-      "Reddit bloqueó el acceso (WAF/IP o falta de OAuth). Probá configurar REDDIT_USER_AGENT, REDDIT_REFRESH_TOKEN o GALLERY_DL_COOKIES.",
+      "Reddit bloqueó el acceso (WAF/IP o falta de OAuth). Probá configurar GALLERY_DL_COOKIES, GALLERY_DL_COOKIES_FROM_BROWSER o REDDIT_REFRESH_TOKEN.",
     );
   }
   if (msg.includes("404") || msg.includes("not found")) {
