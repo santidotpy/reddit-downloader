@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
   try {
     raw = await req.json();
   } catch {
-    return Response.json({ error: "El cuerpo no es JSON válido." }, { status: 400 });
+    return Response.json({ error: "Request body is not valid JSON." }, { status: 400 });
   }
 
   const parsed = bodySchema.safeParse(raw);

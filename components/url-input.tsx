@@ -21,12 +21,12 @@ export function UrlInput({ onSubmit, isPending }: UrlInputProps) {
     try {
       const clip = await navigator.clipboard.readText();
       if (!clip.trim()) {
-        toast.info("El portapapeles está vacío.");
+        toast.info("Clipboard is empty.");
         return;
       }
       setText((prev) => (prev.trim() ? `${prev}\n${clip}` : clip));
     } catch {
-      toast.error("No se pudo leer el portapapeles.");
+      toast.error("Couldn't read the clipboard.");
     }
   }
 
@@ -35,7 +35,7 @@ export function UrlInput({ onSubmit, isPending }: UrlInputProps) {
       <Textarea
         value={text}
         onChange={(event) => setText(event.target.value)}
-        placeholder="Pegá una o varias URLs de Reddit (posts, galerías, videos, links cortos redd.it/… o de compartir /s/…)"
+        placeholder="Paste one or more Reddit URLs (posts, galleries, videos, short redd.it/… or share /s/… links)"
         rows={4}
         className="resize-none text-base"
         onKeyDown={(event) => {
@@ -47,8 +47,8 @@ export function UrlInput({ onSubmit, isPending }: UrlInputProps) {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-muted-foreground" aria-live="polite">
           {detected.length === 0
-            ? "Ninguna URL de Reddit detectada todavía."
-            : `${detected.length} ${detected.length === 1 ? "URL detectada" : "URLs detectadas"}`}
+            ? "No Reddit URLs detected yet."
+            : `${detected.length} ${detected.length === 1 ? "URL detected" : "URLs detected"}`}
         </p>
         <div className="flex gap-2">
           <Button
@@ -57,7 +57,7 @@ export function UrlInput({ onSubmit, isPending }: UrlInputProps) {
             className="transition-transform active:scale-[0.97]"
           >
             <ClipboardIcon />
-            Pegar
+            Paste
           </Button>
           <Button
             onClick={() => onSubmit(text)}
@@ -65,7 +65,7 @@ export function UrlInput({ onSubmit, isPending }: UrlInputProps) {
             className="transition-transform active:scale-[0.97]"
           >
             {isPending ? <Loader2Icon className="animate-spin" /> : <DownloadIcon />}
-            Extraer
+            Extract
           </Button>
         </div>
       </div>

@@ -42,24 +42,24 @@ export async function GET(req: NextRequest) {
   const index = Number.isFinite(parsedIndex) && parsedIndex >= 0 ? parsedIndex : 0;
 
   if (!jobId || !itemId) {
-    return new Response("Faltan parámetros.", { status: 400 });
+    return new Response("Missing parameters.", { status: 400 });
   }
 
   const item = getJob(jobId)?.items.find((i) => i.id === itemId);
-  if (!item?.post) return new Response("Ítem no encontrado.", { status: 404 });
+  if (!item?.post) return new Response("Item not found.", { status: 404 });
   if (item.post.postType === "video") {
-    return new Response("Usá el endpoint de video para este ítem.", { status: 400 });
+    return new Response("Use the video endpoint for this item.", { status: 400 });
   }
 
   let media;
   try {
     media = await getItemMedia(itemId, item.post.permalink, getSessionCookies(jobId));
   } catch {
-    return new Response("No se pudo descargar el archivo.", { status: 502 });
+    return new Response("Could not download the file.", { status: 502 });
   }
 
   const file = media.files[index];
-  if (!file) return new Response("Asset no encontrado.", { status: 404 });
+  if (!file) return new Response("Asset not found.", { status: 404 });
 
   const post = item.post;
   const ext = extname(file.path).toLowerCase();

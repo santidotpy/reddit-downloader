@@ -8,8 +8,8 @@ export default function Page() {
           Reddit Downloader
         </h1>
         <p className="text-sm text-muted-foreground sm:text-base">
-          Pegá una o varias URLs de Reddit y descargá imágenes, galerías y videos
-          con audio.
+          Paste one or more Reddit URLs and download images, galleries, and
+          videos with audio.
         </p>
       </header>
       <Downloader />

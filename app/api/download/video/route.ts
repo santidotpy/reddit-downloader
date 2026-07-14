@@ -24,20 +24,20 @@ export async function GET(req: NextRequest) {
   const jobId = searchParams.get("job");
   const itemId = searchParams.get("item");
   if (!jobId || !itemId) {
-    return new Response("Faltan parámetros.", { status: 400 });
+    return new Response("Missing parameters.", { status: 400 });
   }
 
   const item = getJob(jobId)?.items.find((i) => i.id === itemId);
-  if (!item?.post) return new Response("Ítem no encontrado.", { status: 404 });
+  if (!item?.post) return new Response("Item not found.", { status: 404 });
   if (item.post.postType !== "video") {
-    return new Response("El ítem no es un video.", { status: 400 });
+    return new Response("This item is not a video.", { status: 400 });
   }
 
   let download;
   try {
     download = await downloadVideo(item.post.permalink);
   } catch {
-    return new Response("No se pudo descargar el video.", { status: 502 });
+    return new Response("Could not download the video.", { status: 502 });
   }
 
   const { filePath, cleanup } = download;
@@ -46,7 +46,7 @@ export async function GET(req: NextRequest) {
     size = (await stat(filePath)).size;
   } catch {
     await cleanup();
-    return new Response("El archivo de video no está disponible.", { status: 500 });
+    return new Response("The video file is not available.", { status: 500 });
   }
 
   const post = item.post;

@@ -51,7 +51,7 @@ export async function downloadVideo(permalink: string): Promise<VideoDownload> {
 
     const files = await readdir(dir);
     const file = files.find((f) => f.startsWith("video.")) ?? files[0];
-    if (!file) throw new Error("yt-dlp no generó ningún archivo.");
+    if (!file) throw new Error("yt-dlp produced no file.");
 
     return { filePath: join(dir, file), cleanup };
   } catch (err) {

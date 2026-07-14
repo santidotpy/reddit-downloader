@@ -19,7 +19,7 @@ export async function GET(
 ) {
   const { id } = await ctx.params;
   if (!getJob(id)) {
-    return new Response("Job no encontrado.", { status: 404 });
+    return new Response("Job not found.", { status: 404 });
   }
 
   const encoder = new TextEncoder();

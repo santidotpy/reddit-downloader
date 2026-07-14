@@ -28,7 +28,7 @@ export function NsfwBlur({ children }: { children: React.ReactNode }) {
           className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-background/30 text-foreground backdrop-blur-[2px] transition-transform active:scale-[0.98]"
         >
           <EyeIcon className="size-5" />
-          <span className="text-xs font-medium">Mostrar (NSFW)</span>
+          <span className="text-xs font-medium">Show (NSFW)</span>
         </button>
       )}
     </div>

@@ -35,7 +35,7 @@ async function postExtract({ text, cookies }: ExtractArgs): Promise<ExtractRespo
     const message =
       data && typeof data === "object" && "error" in data
         ? String((data as { error: unknown }).error)
-        : "No se pudo procesar el texto.";
+        : "Couldn't process the text.";
     throw new Error(message);
   }
   return data as ExtractResponse;
@@ -102,9 +102,9 @@ function ProgressSummary({ job }: { job: Job }) {
       <p className="text-sm font-medium">
         {done
           ? failed > 0
-            ? `Listo · ${total - failed}/${total} ok, ${failed} con error`
-            : `Listo · ${total}/${total}`
-          : `Procesando ${settled}/${total}…`}
+            ? `Done · ${total - failed}/${total} ok, ${failed} failed`
+            : `Done · ${total}/${total}`
+          : `Processing ${settled}/${total}…`}
       </p>
       <Progress value={(settled / total) * 100} className="h-1.5 w-40" />
     </div>

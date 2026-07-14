@@ -31,11 +31,11 @@ const bodySchema = z.object({
 export async function POST(req: NextRequest) {
   const parsed = bodySchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {
-    return Response.json({ error: "Body inválido." }, { status: 400 });
+    return Response.json({ error: "Invalid request body." }, { status: 400 });
   }
 
   const job = getJob(parsed.data.jobId);
-  if (!job) return Response.json({ error: "Job no encontrado." }, { status: 404 });
+  if (!job) return Response.json({ error: "Job not found." }, { status: 404 });
   const sessionCookies = getSessionCookies(parsed.data.jobId);
 
   const wanted = new Set(parsed.data.itemIds);
@@ -47,7 +47,7 @@ export async function POST(req: NextRequest) {
       i.post.postType !== "external",
   );
   if (items.length === 0) {
-    return Response.json({ error: "No hay ítems descargables." }, { status: 422 });
+    return Response.json({ error: "No downloadable items." }, { status: 422 });
   }
 
   // level 0 (store): images/videos are already compressed, so deflate just

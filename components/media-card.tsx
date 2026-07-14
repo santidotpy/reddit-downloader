@@ -28,10 +28,10 @@ import type { JobItem } from "@/lib/job-types";
 import type { PostType, ResolvedPost } from "@/lib/reddit/types";
 
 const TYPE_LABEL: Record<PostType, string> = {
-  image: "Imagen",
-  gallery: "Galería",
+  image: "Image",
+  gallery: "Gallery",
   video: "Video",
-  external: "No soportado",
+  external: "Unsupported",
 };
 
 function TypeIcon({ type, className }: { type: PostType; className?: string }) {
@@ -107,7 +107,7 @@ function Preview({ item }: { item: JobItem }) {
       <div className="flex h-full w-full flex-col items-center justify-center gap-1.5 p-4 text-center text-destructive">
         <CircleXIcon className="size-6" />
         <span className="text-xs leading-snug">
-          {error?.message ?? "Falló la extracción."}
+          {error?.message ?? "Extraction failed."}
         </span>
       </div>
     );
@@ -179,7 +179,9 @@ function ReadyMeta({ post }: { post: ResolvedPost }) {
         {post.isNsfw && <Badge variant="destructive">NSFW</Badge>}
         {duration && <Badge variant="outline">{duration}</Badge>}
         {post.postType === "gallery" && (
-          <Badge variant="outline">{post.assets.length} imágenes</Badge>
+          <Badge variant="outline">
+            {post.assets.length} {post.assets.length === 1 ? "image" : "images"}
+          </Badge>
         )}
       </div>
       <p className="mt-auto truncate text-xs text-muted-foreground">
@@ -190,10 +192,10 @@ function ReadyMeta({ post }: { post: ResolvedPost }) {
 }
 
 const STATUS_TEXT: Record<JobItem["status"], string> = {
-  queued: "En cola",
-  processing: "Procesando…",
-  ready: "Listo",
-  failed: "Falló",
+  queued: "Queued",
+  processing: "Processing…",
+  ready: "Ready",
+  failed: "Failed",
 };
 
 function PendingMeta({ item }: { item: JobItem }) {
@@ -227,7 +229,7 @@ function DownloadButton({ item, jobId }: { item: JobItem; jobId: string }) {
         await downloadFile(mediaDownloadUrl(jobId, item.id));
       }
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "No se pudo descargar.");
+      toast.error(err instanceof Error ? err.message : "Download failed.");
     } finally {
       setBusy(false);
     }
@@ -240,7 +242,7 @@ function DownloadButton({ item, jobId }: { item: JobItem; jobId: string }) {
       className="w-full transition-transform active:scale-[0.97]"
     >
       {busy ? <Loader2Icon className="animate-spin" /> : <DownloadIcon />}
-      Descargar
+      Download
     </Button>
   );
 }

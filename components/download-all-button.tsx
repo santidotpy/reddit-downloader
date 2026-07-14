@@ -24,7 +24,7 @@ export function DownloadAllButton({ job }: { job: Job }) {
         downloadable.map((i) => i.id),
       );
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "No se pudo armar el ZIP.");
+      toast.error(err instanceof Error ? err.message : "Couldn't build the ZIP.");
     } finally {
       setBusy(false);
     }
@@ -38,7 +38,7 @@ export function DownloadAllButton({ job }: { job: Job }) {
       className="transition-transform active:scale-[0.97]"
     >
       {busy ? <Loader2Icon className="animate-spin" /> : <DownloadIcon />}
-      Descargar todo ({downloadable.length})
+      Download all ({downloadable.length})
     </Button>
   );
 }

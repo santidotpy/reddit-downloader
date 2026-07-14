@@ -196,7 +196,7 @@ async function extractAt(
   try {
     parsed = JSON.parse(stdout);
   } catch {
-    throw new RedditFetchError("invalid_response", "gallery-dl no devolvió JSON válido.");
+    throw new RedditFetchError("invalid_response", "gallery-dl did not return valid JSON.");
   }
 
   const entries = z.array(z.array(z.unknown())).safeParse(parsed);
@@ -285,8 +285,8 @@ function normalize(rawUrl: string, meta: Kw, urls: UrlEntry[]): ResolvedPost {
     postType: "external",
     assets: [],
     unsupportedReason: base.domain
-      ? `gallery-dl no encontró media descargable (dominio: ${base.domain}).`
-      : "gallery-dl no encontró media descargable en este post.",
+      ? `gallery-dl found no downloadable media (domain: ${base.domain}).`
+      : "gallery-dl found no downloadable media in this post.",
   };
 }
 
@@ -327,7 +327,7 @@ export async function downloadMedia(
       }),
     );
     if (files.length === 0) {
-      throw new RedditFetchError("invalid_response", "gallery-dl no descargó ningún archivo.");
+      throw new RedditFetchError("invalid_response", "gallery-dl downloaded no files.");
     }
     return { dir, files, cleanup };
   } catch (err) {
@@ -390,18 +390,18 @@ function errorFromAbort(payload: unknown): RedditFetchError {
   ) {
     return new RedditFetchError(
       "forbidden",
-      "Reddit bloqueó el acceso (WAF/IP o falta de OAuth). Probá configurar GALLERY_DL_COOKIES, GALLERY_DL_COOKIES_FROM_BROWSER o REDDIT_REFRESH_TOKEN.",
+      "Reddit blocked the request (WAF/IP, or missing auth). Try setting GALLERY_DL_COOKIES, GALLERY_DL_COOKIES_FROM_BROWSER, or REDDIT_REFRESH_TOKEN.",
     );
   }
   if (msg.includes("404") || msg.includes("not found")) {
-    return new RedditFetchError("not_found", "Reddit no encontró el post (404).");
+    return new RedditFetchError("not_found", "Reddit could not find the post (404).");
   }
   if (msg.includes("429") || msg.includes("too many requests")) {
-    return new RedditFetchError("rate_limit", "Reddit limitó las peticiones (429). Reintentá luego.");
+    return new RedditFetchError("rate_limit", "Reddit rate-limited the request (429). Try again later.");
   }
   return new RedditFetchError(
     "network",
-    `gallery-dl abortó la extracción: ${p?.error ?? "error desconocido"}.`,
+    `gallery-dl aborted the extraction: ${p?.error ?? "unknown error"}.`,
   );
 }
 
@@ -410,23 +410,23 @@ function toFetchError(err: unknown): RedditFetchError {
   if (e?.code === "ENOENT") {
     return new RedditFetchError(
       "network",
-      "gallery-dl no está instalado o no se encuentra en el PATH (configurá GALLERY_DL_PATH).",
+      "gallery-dl is not installed or not on the PATH (set GALLERY_DL_PATH).",
     );
   }
   if (e?.killed) {
-    return new RedditFetchError("network", "gallery-dl excedió el tiempo límite.");
+    return new RedditFetchError("network", "gallery-dl timed out.");
   }
   const stderr = (e?.stderr ?? "").toLowerCase();
   if (stderr.includes("404") || stderr.includes("not found")) {
-    return new RedditFetchError("not_found", "Reddit no encontró el post (404).");
+    return new RedditFetchError("not_found", "Reddit could not find the post (404).");
   }
   if (stderr.includes("403") || stderr.includes("401") || stderr.includes("forbidden")) {
-    return new RedditFetchError("forbidden", "Reddit denegó el acceso al post (403).");
+    return new RedditFetchError("forbidden", "Reddit denied access to the post (403).");
   }
   if (stderr.includes("429") || stderr.includes("too many requests")) {
-    return new RedditFetchError("rate_limit", "Reddit limitó las peticiones (429). Reintentá luego.");
+    return new RedditFetchError("rate_limit", "Reddit rate-limited the request (429). Try again later.");
   }
-  return new RedditFetchError("network", "gallery-dl falló al extraer el post.");
+  return new RedditFetchError("network", "gallery-dl failed to extract the post.");
 }
 
 function hostnameOf(url?: string): string | undefined {
